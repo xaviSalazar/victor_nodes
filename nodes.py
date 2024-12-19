@@ -191,11 +191,73 @@ class ImageToBase64:
             img.save(file_path, pnginfo=metadata, compress_level=self.compress_level)
 
         return (results,)
+
+# MASKS SUBTRACT
+
+class WAS_Mask_Subtract:
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+                    "required": {
+                        "masks_a": ("MASK",),
+                        "masks_b": ("MASK",),
+                    }
+                }
+
+    CATEGORY = "WAS Suite/Image/Masking"
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("MASKS",)
+
+    FUNCTION = "subtract_masks"
+
+    def subtract_masks(self, masks_a, masks_b):
+        subtracted_masks = torch.clamp(masks_a - masks_b, 0, 255)
+        return (subtracted_masks,)
+
+# MASKS ADD
+
+class WAS_Mask_Add:
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+                    "required": {
+                        "masks_a": ("MASK",),
+                        "masks_b": ("MASK",),
+                    }
+                }
+
+    CATEGORY = "WAS Suite/Image/Masking"
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("MASKS",)
+
+    FUNCTION = "add_masks"
+
+    def add_masks(self, masks_a, masks_b):
+        if masks_a.ndim > 2 and masks_b.ndim > 2:
+            added_masks = masks_a + masks_b
+        else:
+            added_masks = torch.clamp(masks_a.unsqueeze(1) + masks_b.unsqueeze(1), 0, 255)
+            added_masks = added_masks.squeeze(1)
+        return (added_masks,)
+
+
 # Register the node class with ComfyUI
 NODE_CLASS_MAPPINGS = {
     "LoadBase64Image": LoadBase64Image,
     "LoadBase64Mask": LoadBase64Mask,
-    "ImageToBase64": ImageToBase64
+    "ImageToBase64": ImageToBase64,
+    "WAS_Mask_Add": WAS_Mask_Add,
+    "WAS_Mask_Subtract": WAS_Mask_Subtract,
 
 }
 
@@ -203,5 +265,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadBase64Image": "Load Base64 Image Node",
     "LoadBase64Mask": "Load Base64 Mask Node",
-    "ImageToBase64": "Image to Base64 Node"
+    "ImageToBase64": "Image to Base64 Node",
+    "WAS_Mask_Add": "mask add victor",
+    "WAS_Mask_Subtract": "mask subtract victor",
 }
