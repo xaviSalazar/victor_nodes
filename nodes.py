@@ -256,82 +256,82 @@ class WAS_Mask_Add:
 
 ## IMAGE SAVE METADATA
 class saveImageLazy():
-  def __init__(self):
-    self.output_dir = folder_paths.get_output_directory()
-    self.type = "output"
-    self.compress_level = 4
+    def __init__(self):
+        self.output_dir = folder_paths.get_output_directory()
+        self.type = "output"
+        self.compress_level = 4
 
-  @classmethod
-  def INPUT_TYPES(s):
-    return {"required":
-          {"images": ("IMAGE",),
-           "filename_prefix": ("STRING", {"default": "ComfyUI"}),
-           "save_metadata": ("BOOLEAN", {"default": True}),
-           },
-        "optional":{},
-        "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
-      }
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "save_metadata": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {},
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+        }
 
-  RETURN_TYPES = ("IMAGE",)
-  RETURN_NAMES = ("images",)
-  OUTPUT_NODE = False
-  FUNCTION = "save"
-  CATEGORY = "EasyUse/Image"
+    RETURN_TYPES = ("IMAGE", "STRING")  # Include LIST for full file paths
+    RETURN_NAMES = ("images", "filenames")  # Match the expected input for the next step
+    OUTPUT_NODE = False
+    FUNCTION = "save"
+    CATEGORY = "EasyUse/Image"
 
-  def save(self, images, filename_prefix, save_metadata, prompt=None, extra_pnginfo=None):
-    extension = 'png'
+    def save(self, images, save_metadata, prompt=None, extra_pnginfo=None):
+        extension = 'png'
 
-    full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(
-      filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+        # Derive filename_prefix internally
+        default_prefix = "AnimateDiff"
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(
+            default_prefix, self.output_dir, images[0].shape[1], images[0].shape[0]
+        )
 
-    results = list()
-    for (batch_number, image) in enumerate(images):
-      i = 255. * image.cpu().numpy()
-      img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
-      metadata = None
+        complete_file_paths = list()
+        for (batch_number, image) in enumerate(images):
+            i = 255. * image.cpu().numpy()
+            img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
+            metadata = None
 
-      filename_with_batch_num = filename.replace(
-        "%batch_num%", str(batch_number))
+            filename_with_batch_num = filename.replace(
+                "%batch_num%", str(batch_number)
+            )
 
-      counter = 1
+            counter = 1
 
-      if os.path.exists(full_output_folder) and os.listdir(full_output_folder):
-        filtered_filenames = list(filter(
-          lambda filename: filename.startswith(
-            filename_with_batch_num + "_")
-                           and filename[len(filename_with_batch_num) + 1:-4].isdigit(),
-          os.listdir(full_output_folder)
-        ))
+            if os.path.exists(full_output_folder) and os.listdir(full_output_folder):
+                filtered_filenames = list(filter(
+                    lambda filename: filename.startswith(
+                        filename_with_batch_num + "_"
+                    ) and filename[len(filename_with_batch_num) + 1:-4].isdigit(),
+                    os.listdir(full_output_folder)
+                ))
 
-        if filtered_filenames:
-          max_counter = max(
-            int(filename[len(filename_with_batch_num) + 1:-4])
-            for filename in filtered_filenames
-          )
-          counter = max_counter + 1
+                if filtered_filenames:
+                    max_counter = max(
+                        int(filename[len(filename_with_batch_num) + 1:-4])
+                        for filename in filtered_filenames
+                    )
+                    counter = max_counter + 1
 
-      file = f"{filename_with_batch_num}_{counter:05}.{extension}"
+            file = f"{filename_with_batch_num}_{counter:05}.{extension}"
 
-      save_path = os.path.join(full_output_folder, file)
+            save_path = os.path.join(full_output_folder, file)  # Full file path
 
-      if save_metadata:
-        metadata = PngInfo()
-        if prompt is not None:
-          metadata.add_text("prompt", json.dumps(prompt))
-        if extra_pnginfo is not None:
-          for x in extra_pnginfo:
-            metadata.add_text(
-              x, json.dumps(extra_pnginfo[x]))
+            if save_metadata:
+                metadata = PngInfo()
+                if prompt is not None:
+                    metadata.add_text("prompt", json.dumps(prompt))
+                if extra_pnginfo is not None:
+                    for x in extra_pnginfo:
+                        metadata.add_text(x, json.dumps(extra_pnginfo[x]))
 
-      img.save(save_path, pnginfo=metadata)
+            img.save(save_path, pnginfo=metadata)
 
-      results.append({
-        "filename": file,
-        "subfolder": subfolder,
-        "type": self.type
-      })
+            complete_file_paths.append(save_path)  # Add full path to the list
 
-    return {"ui": {"images": results} , "result": (images,)}
+        # Return images and the list of full file paths
+        return (images, complete_file_paths)
 
 # Register the node class with ComfyUI
 NODE_CLASS_MAPPINGS = {
