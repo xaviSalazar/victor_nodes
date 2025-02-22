@@ -8,7 +8,7 @@ import hashlib
 import folder_paths
 from PIL.PngImagePlugin import PngInfo
 import json
-
+import cv2
 
 class LoadBase64Image:
     @classmethod
