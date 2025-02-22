@@ -333,6 +333,86 @@ class saveImageLazy():
         # Return images and the list of full file paths
         return (images, complete_file_paths)
 
+# gaussian blur a tensor image batch in format [B x H x W x C] on H/W (spatial, per-image, per-channel)
+def cv_blur_tensor(images, dx, dy):
+    if min(dx, dy) > 100:
+        np_img = torch.nn.functional.interpolate(images.detach().clone().movedim(-1,1), scale_factor=0.1, mode='bilinear').movedim(1,-1).cpu().numpy()
+        for index, image in enumerate(np_img):
+            np_img[index] = cv2.GaussianBlur(image, (dx // 20 * 2 + 1, dy // 20 * 2 + 1), 0)
+        return torch.nn.functional.interpolate(torch.from_numpy(np_img).movedim(-1,1), size=(images.shape[1], images.shape[2]), mode='bilinear').movedim(1,-1)
+    else:
+        np_img = images.detach().clone().cpu().numpy()
+        for index, image in enumerate(np_img):
+            np_img[index] = cv2.GaussianBlur(image, (dx, dy), 0)
+        return torch.from_numpy(np_img)
+
+# guided filter a tensor image batch in format [B x H x W x C] on H/W (spatial, per-image, per-channel)
+def guided_filter_tensor(ref, images, d, s):
+    if d > 100:
+        np_img = torch.nn.functional.interpolate(images.detach().clone().movedim(-1,1), scale_factor=0.1, mode='bilinear').movedim(1,-1).cpu().numpy()
+        np_ref = torch.nn.functional.interpolate(ref.detach().clone().movedim(-1,1), scale_factor=0.1, mode='bilinear').movedim(1,-1).cpu().numpy()
+        for index, image in enumerate(np_img):
+            np_img[index] = guidedFilter(np_ref[index], image, d // 20 * 2 + 1, s)
+        return torch.nn.functional.interpolate(torch.from_numpy(np_img).movedim(-1,1), size=(images.shape[1], images.shape[2]), mode='bilinear').movedim(1,-1)
+    else:
+        np_img = images.detach().clone().cpu().numpy()
+        np_ref = ref.cpu().numpy()
+        for index, image in enumerate(np_img):
+            np_img[index] = guidedFilter(np_ref[index], image, d, s)
+        return torch.from_numpy(np_img)
+
+class RestoreDetail:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "detail": ("IMAGE",),
+                "mode": (["add", "multiply"],),
+                "blur_type": (["blur", "guidedFilter"],),
+                "blur_size": ("INT", {"default": 1, "min": 1, "max": 1023}),
+                "factor": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01, "round": 0.01}),
+            },
+            "optional": {
+                "mask": ("IMAGE",),  # Optional mask
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "batch_normalize"
+    CATEGORY = "image/filters"
+
+    def batch_normalize(self, images, detail, mode, blur_type, blur_size, factor, mask=None):
+        t = images.detach().clone() + 0.1
+        ref = detail.detach().clone() + 0.1
+
+        if ref.shape[0] < t.shape[0]:
+            ref = ref[0].unsqueeze(0).repeat(t.shape[0], 1, 1, 1)
+
+        d = blur_size * 2 + 1
+
+        if blur_type == "blur":
+            blurred = cv_blur_tensor(t, d, d)
+            blurred_ref = cv_blur_tensor(ref, d, d)
+        elif blur_type == "guidedFilter":
+            blurred = guided_filter_tensor(t, t, d, 0.01)
+            blurred_ref = guided_filter_tensor(ref, ref, d, 0.01)
+
+        if mode == "multiply":
+            t = (ref / blurred_ref) * blurred
+        else:
+            t = (ref - blurred_ref) + blurred
+
+        t = t - 0.1
+        t = torch.clamp(torch.lerp(images, t, factor), 0, 1)
+
+        # Apply mask if provided
+        if mask is not None:
+            mask = mask.expand_as(t)  # Ensure mask has the same shape
+            t = t * mask + images * (1 - mask)
+
+        return (t,)
+
 # Register the node class with ComfyUI
 NODE_CLASS_MAPPINGS = {
     "LoadBase64Image": LoadBase64Image,
@@ -341,6 +421,7 @@ NODE_CLASS_MAPPINGS = {
     "WAS_Mask_Add": WAS_Mask_Add,
     "WAS_Mask_Subtract": WAS_Mask_Subtract,
     "easy saveImageLazy": saveImageLazy,
+    "RestoreDetail": RestoreDetail,
 
 }
 
@@ -352,4 +433,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WAS_Mask_Add": "mask add victor",
     "WAS_Mask_Subtract": "mask subtract victor",
     "easy saveImageLazy": "Save Image (Lazy)",
+    "RestoreDetail": "Restore Detail",
+
 }
