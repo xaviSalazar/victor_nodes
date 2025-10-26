@@ -20,51 +20,69 @@ class LoadBase64Image:
     FUNCTION = "load_image"
 
     def load_image(self, base64_string):
-        if base64_string.startswith("data:image/") or base64_string.startswith(
-            "data:application/octet-stream;base64,"
-        ):
-            base64_string = base64_string.split(";")[1].split(",")[1]
-        image_data = base64.b64decode(base64_string)
-        image = Image.open(io.BytesIO(image_data))
+        # Skip execution if string is empty or None
+        if not base64_string or base64_string.strip() == "":
+            print("[LoadBase64Image] Skipped — empty base64 string")
+            return (None, None)
 
-        output_images = []
-        output_masks = []
-        w, h = None, None
+        try:
+            # Clean up header if needed
+            if base64_string.startswith("data:image/") or base64_string.startswith(
+                "data:application/octet-stream;base64,"
+            ):
+                base64_string = base64_string.split(";")[1].split(",")[1]
 
-        excluded_formats = ['MPO']
+            # Try decoding base64
+            image_data = base64.b64decode(base64_string)
+            image = Image.open(io.BytesIO(image_data))
 
-        for i in ImageSequence.Iterator(image):
-            i = ImageOps.exif_transpose(i)
+            output_images = []
+            output_masks = []
+            w, h = None, None
+            excluded_formats = ['MPO']
 
-            if i.mode == 'I':
-                i = i.point(lambda i: i * (1 / 255))
-            image = i.convert("RGB")
+            for i in ImageSequence.Iterator(image):
+                i = ImageOps.exif_transpose(i)
+                if i.mode == 'I':
+                    i = i.point(lambda i: i * (1 / 255))
+                image_rgb = i.convert("RGB")
 
-            if len(output_images) == 0:
-                w = image.size[0]
-                h = image.size[1]
+                if len(output_images) == 0:
+                    w, h = image_rgb.size
 
-            if image.size[0] != w or image.size[1] != h:
-                continue
+                if image_rgb.size != (w, h):
+                    continue
 
-            image = np.array(image).astype(np.float32) / 255.0
-            image = torch.from_numpy(image)[None,]
-            if 'A' in i.getbands():
-                mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
-                mask = 1. - torch.from_numpy(mask)
+                image_tensor = torch.from_numpy(
+                    np.array(image_rgb).astype(np.float32) / 255.0
+                )[None,]
+
+                if 'A' in i.getbands():
+                    mask = 1.0 - torch.from_numpy(
+                        np.array(i.getchannel('A')).astype(np.float32) / 255.0
+                    )
+                else:
+                    mask = torch.zeros((64, 64), dtype=torch.float32)
+
+                output_images.append(image_tensor)
+                output_masks.append(mask.unsqueeze(0))
+
+            if not output_images:
+                print("[LoadBase64Image] Skipped — no valid image frames")
+                return (None, None)
+
+            if len(output_images) > 1 and image.format not in excluded_formats:
+                output_image = torch.cat(output_images, dim=0)
+                output_mask = torch.cat(output_masks, dim=0)
             else:
-                mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
-            output_images.append(image)
-            output_masks.append(mask.unsqueeze(0))
+                output_image = output_images[0]
+                output_mask = output_masks[0]
 
-        if len(output_images) > 1 and image.format not in excluded_formats:
-            output_image = torch.cat(output_images, dim=0)
-            output_mask = torch.cat(output_masks, dim=0)
-        else:
-            output_image = output_images[0]
-            output_mask = output_masks[0]
+            return (output_image, output_mask)
 
-        return (output_image, output_mask)
+        except Exception as e:
+            print(f"[LoadBase64Image] Skipped — invalid or corrupt base64 ({e})")
+            return (None, None)
 
     @classmethod
     def IS_CHANGED(cls, base64_string):
